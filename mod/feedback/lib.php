@@ -2935,7 +2935,6 @@ function feedback_send_email($cm, $feedback, $course, $userid) {
 
         $strfeedbacks = get_string('modulenameplural', 'feedback');
         $strfeedback  = get_string('modulename', 'feedback');
-        $strcompleted  = get_string('completed', 'feedback');
 
         if ($feedback->anonymous == FEEDBACK_ANONYMOUS_NO) {
             $printusername = fullname($user);
@@ -2952,7 +2951,12 @@ function feedback_send_email($cm, $feedback, $course, $userid) {
                             'userid='.$userid.'&'.
                             'do_show=showentries';
 
-            $postsubject = $strcompleted.': '.$info->username.' -> '.$feedback->name;
+            $object = new stdClass();//using 'object' as variable name because 'info' is already used above.
+            $object->username = $info->username;
+            $object->feedbackname = $feedback->name;
+            $strcompleted  = get_string('completed', 'feedback', $object);
+            
+            $postsubject = $strcompleted;
             $posttext = feedback_send_email_text($info, $course);
 
             if ($teacher->mailformat == 1) {
@@ -3013,7 +3017,6 @@ function feedback_send_email_anonym($cm, $feedback, $course) {
 
         $strfeedbacks = get_string('modulenameplural', 'feedback');
         $strfeedback  = get_string('modulename', 'feedback');
-        $strcompleted  = get_string('completed', 'feedback');
         $printusername = get_string('anonymous_user', 'feedback');
 
         foreach ($teachers as $teacher) {
@@ -3022,7 +3025,12 @@ function feedback_send_email_anonym($cm, $feedback, $course) {
             $info->feedback = format_string($feedback->name, true);
             $info->url = $CFG->wwwroot.'/mod/feedback/show_entries_anonym.php?id='.$cm->id;
 
-            $postsubject = $strcompleted.': '.$info->username.' -> '.$feedback->name;
+            $object = new stdClass();//using 'object' as variable name because 'info' is already used above.
+            $object->username = $info->username;
+            $object->feedbackname = $feedback->name;
+            $strcompleted  = get_string('completed', 'feedback', $object);
+
+            $postsubject = $strcompleted;
             $posttext = feedback_send_email_text($info, $course);
 
             if ($teacher->mailformat == 1) {
