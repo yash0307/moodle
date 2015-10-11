@@ -529,7 +529,7 @@ function scorm_cron () {
 
     require_once($CFG->dirroot.'/mod/scorm/locallib.php');
 
-    $sitetimezone = $CFG->timezone;
+    $sitetimezone = core_date::get_server_timezone();
     // Now see if there are any scorm updates to be done.
 
     if (!isset($CFG->scorm_updatetimelast)) {    // To catch the first time.
@@ -947,9 +947,12 @@ function scorm_pluginfile($course, $cm, $context, $filearea, $args, $forcedownlo
         // TODO: add any other access restrictions here if needed!
 
     } else if ($filearea === 'package') {
-        if (!has_capability('moodle/course:manageactivities', $context)) {
+        // Check if the global setting for disabling package downloads is enabled.
+        $protectpackagedownloads = get_config('scorm', 'protectpackagedownloads');
+        if ($protectpackagedownloads and !has_capability('moodle/course:manageactivities', $context)) {
             return false;
         }
+        $revision = (int)array_shift($args); // Prevents caching problems - ignored here.
         $relativepath = implode('/', $args);
         $fullpath = "/$context->id/mod_scorm/package/0/$relativepath";
         $lifetime = 0; // No caching here.
@@ -1438,4 +1441,28 @@ function scorm_check_mode($scorm, &$newattempt, &$attempt, $userid, &$mode) {
             $mode = 'review';
         }
     }
+}
+
+/**
+ * Trigger the course_module_viewed event.
+ *
+ * @param  stdClass $scorm        scorm object
+ * @param  stdClass $course     course object
+ * @param  stdClass $cm         course module object
+ * @param  stdClass $context    context object
+ * @since Moodle 3.0
+ */
+function scorm_view($scorm, $course, $cm, $context) {
+
+    // Trigger course_module_viewed event.
+    $params = array(
+        'context' => $context,
+        'objectid' => $scorm->id
+    );
+
+    $event = \mod_scorm\event\course_module_viewed::create($params);
+    $event->add_record_snapshot('course_modules', $cm);
+    $event->add_record_snapshot('course', $course);
+    $event->add_record_snapshot('scorm', $scorm);
+    $event->trigger();
 }

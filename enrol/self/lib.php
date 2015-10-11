@@ -234,8 +234,8 @@ class enrol_self_plugin extends enrol_plugin {
 
         $enrolstatus = $this->can_self_enrol($instance);
 
-        // Don't show enrolment instance form, if user can't enrol using it.
         if (true === $enrolstatus) {
+            // This user can self enrol using this instance.
             $form = new enrol_self_enrol_form(NULL, $instance);
             $instanceid = optional_param('instance', 0, PARAM_INT);
             if ($instance->id == $instanceid) {
@@ -243,14 +243,23 @@ class enrol_self_plugin extends enrol_plugin {
                     $this->enrol_self($instance, $data);
                 }
             }
-
-            ob_start();
-            $form->display();
-            $output = ob_get_clean();
-            return $OUTPUT->box($output);
         } else {
-            return $OUTPUT->box($enrolstatus);
+            // This user can not self enrol using this instance. Using an empty form to keep
+            // the UI consistent with other enrolment plugins that returns a form.
+            $data = new stdClass();
+            $data->header = $this->get_instance_name($instance);
+            $data->info = $enrolstatus;
+
+            // The can_self_enrol call returns a button to the login page if the user is a
+            // guest, setting the login url to the form if that is the case.
+            $url = isguestuser() ? get_login_url() : null;
+            $form = new enrol_self_empty_form($url, $data);
         }
+
+        ob_start();
+        $form->display();
+        $output = ob_get_clean();
+        return $OUTPUT->box($output);
     }
 
     /**
@@ -262,12 +271,12 @@ class enrol_self_plugin extends enrol_plugin {
      * @return bool|string true if successful, else error message or false.
      */
     public function can_self_enrol(stdClass $instance, $checkuserenrolment = true) {
-        global $DB, $USER, $CFG;
+        global $CFG, $DB, $OUTPUT, $USER;
 
         if ($checkuserenrolment) {
             if (isguestuser()) {
                 // Can not enrol guest.
-                return get_string('noguestaccess', 'enrol');
+                return get_string('noguestaccess', 'enrol') . $OUTPUT->continue_button(get_login_url());
             }
             // Check if user is already enroled.
             if ($DB->get_record('user_enrolments', array('userid' => $USER->id, 'enrolid' => $instance->id))) {
@@ -280,11 +289,11 @@ class enrol_self_plugin extends enrol_plugin {
         }
 
         if ($instance->enrolstartdate != 0 and $instance->enrolstartdate > time()) {
-            return get_string('canntenrol', 'enrol_self');
+            return get_string('canntenrolearly', 'enrol_self', userdate($instance->enrolstartdate));
         }
 
         if ($instance->enrolenddate != 0 and $instance->enrolenddate < time()) {
-            return get_string('canntenrol', 'enrol_self');
+            return get_string('canntenrollate', 'enrol_self', userdate($instance->enrolenddate));
         }
 
         if (!$instance->customint6) {
@@ -412,8 +421,9 @@ class enrol_self_plugin extends enrol_plugin {
 
         if (trim($instance->customtext1) !== '') {
             $message = $instance->customtext1;
-            $message = str_replace('{$a->coursename}', $a->coursename, $message);
-            $message = str_replace('{$a->profileurl}', $a->profileurl, $message);
+            $key = array('{$a->coursename}', '{$a->profileurl}', '{$a->fullname}', '{$a->email}');
+            $value = array($a->coursename, $a->profileurl, fullname($user), $user->email);
+            $message = str_replace($key, $value, $message);
             if (strpos($message, '<') === false) {
                 // Plain text only.
                 $messagetext = $message;

@@ -54,6 +54,16 @@ if (!function_exists('json_encode') || !function_exists('json_decode')) {
 
 define('NO_OUTPUT_BUFFERING', true);
 
+if (isset($_POST['upgradekey'])) {
+    // Before you start reporting issues about the collision attacks against
+    // SHA-1, you should understand that we are not actually attempting to do
+    // any cryptography here. This is hashed purely so that the key is not
+    // that apparent in the address bar itself. Anyone who catches the HTTP
+    // traffic can immediately use it as a valid admin key.
+    header('Location: index.php?cache=0&upgradekeyhash='.sha1($_POST['upgradekey']));
+    die();
+}
+
 if ((isset($_GET['cache']) and $_GET['cache'] === '0')
         or (isset($_POST['cache']) and $_POST['cache'] === '0')
         or (!isset($_POST['cache']) and !isset($_GET['cache']) and empty($_GET['sesskey']) and empty($_POST['sesskey']))) {
@@ -95,10 +105,14 @@ $showallplugins = optional_param('showallplugins', 0, PARAM_BOOL);
 $agreelicense   = optional_param('agreelicense', 0, PARAM_BOOL);
 $fetchupdates   = optional_param('fetchupdates', 0, PARAM_BOOL);
 $newaddonreq    = optional_param('installaddonrequest', null, PARAM_RAW);
+$upgradekeyhash = optional_param('upgradekeyhash', null, PARAM_ALPHANUM);
 
 // Set up PAGE.
 $url = new moodle_url('/admin/index.php');
 $url->param('cache', $cache);
+if (isset($upgradekeyhash)) {
+    $url->param('upgradekeyhash', $upgradekeyhash);
+}
 $PAGE->set_url($url);
 unset($url);
 
@@ -203,7 +217,7 @@ if (!core_tables_exist()) {
         $PAGE->set_heading($strinstallation . ' - Moodle ' . $CFG->target_release);
 
         $output = $PAGE->get_renderer('core', 'admin');
-        $url = new moodle_url('/admin/index.php', array('agreelicense' => 1, 'confirmrelease' => 1, 'lang' => $CFG->lang));
+        $url = new moodle_url($PAGE->url, array('agreelicense' => 1, 'confirmrelease' => 1, 'lang' => $CFG->lang));
         echo $output->unsatisfied_dependencies_page($version, $failed, $url);
         die();
     }
@@ -253,10 +267,12 @@ if (empty($CFG->version)) {
 // Detect config cache inconsistency, this happens when you switch branches on dev servers.
 if ($CFG->version != $DB->get_field('config', 'value', array('name'=>'version'))) {
     purge_all_caches();
-    redirect(new moodle_url('/admin/index.php'), 'Config cache inconsistency detected, resetting caches...');
+    redirect(new moodle_url($PAGE->url), 'Config cache inconsistency detected, resetting caches...');
 }
 
 if (!$cache and $version > $CFG->version) {  // upgrade
+
+    check_upgrade_key($upgradekeyhash);
 
     // Warning about upgrading a test site.
     $testsite = false;
@@ -318,7 +334,7 @@ if (!$cache and $version > $CFG->version) {  // upgrade
         $PAGE->set_heading($strplugincheck);
         $PAGE->set_cacheable(false);
 
-        $reloadurl = new moodle_url('/admin/index.php', array('confirmupgrade' => 1, 'confirmrelease' => 1, 'cache' => 0));
+        $reloadurl = new moodle_url($PAGE->url, array('confirmupgrade' => 1, 'confirmrelease' => 1, 'cache' => 0));
 
         if ($fetchupdates) {
             // No sesskey support guaranteed here, because sessions might not work yet.
@@ -342,15 +358,15 @@ if (!$cache and $version > $CFG->version) {  // upgrade
         }
 
         echo $output->upgrade_plugin_check_page(core_plugin_manager::instance(), \core\update\checker::instance(),
-                $version, $showallplugins, $reloadurl,
-                new moodle_url('/admin/index.php', array('confirmupgrade'=>1, 'confirmrelease'=>1, 'confirmplugincheck'=>1, 'cache'=>0)));
+                $version, $showallplugins, $reloadurl, new moodle_url($PAGE->url, array(
+                'confirmupgrade' => 1, 'confirmrelease' => 1, 'confirmplugincheck' => 1, 'cache' => 0)));
         die();
 
     } else {
         // Always verify plugin dependencies!
         $failed = array();
         if (!core_plugin_manager::instance()->all_plugins_ok($version, $failed)) {
-            $reloadurl = new moodle_url('/admin/index.php', array('confirmupgrade' => 1, 'confirmrelease' => 1, 'cache' => 0));
+            $reloadurl = new moodle_url($PAGE->url, array('confirmupgrade' => 1, 'confirmrelease' => 1, 'cache' => 0));
             echo $output->unsatisfied_dependencies_page($version, $failed, $reloadurl);
             die();
         }
@@ -374,6 +390,9 @@ if (!$cache and $branch <> $CFG->branch) {  // Update the branch
 }
 
 if (!$cache and moodle_needs_upgrading()) {
+
+    check_upgrade_key($upgradekeyhash);
+
     if (!$PAGE->headerprinted) {
         // means core upgrade or installation was not already done
 
@@ -413,7 +432,7 @@ if (!$cache and moodle_needs_upgrading()) {
             echo $output->upgrade_plugin_check_page(core_plugin_manager::instance(), \core\update\checker::instance(),
                     $version, $showallplugins,
                     new moodle_url($PAGE->url),
-                    new moodle_url('/admin/index.php', array('confirmplugincheck'=>1, 'cache'=>0)));
+                    new moodle_url($PAGE->url, array('confirmplugincheck' => 1, 'cache' => 0)));
             die();
         }
 
@@ -422,7 +441,7 @@ if (!$cache and moodle_needs_upgrading()) {
         if (!core_plugin_manager::instance()->all_plugins_ok($version, $failed)) {
             /** @var core_admin_renderer $output */
             $output = $PAGE->get_renderer('core', 'admin');
-            $reloadurl = new moodle_url('/admin/index.php', array('cache' => 0));
+            $reloadurl = new moodle_url($PAGE->url, array('cache' => 0));
             echo $output->unsatisfied_dependencies_page($version, $failed, $reloadurl);
             die();
         }
@@ -513,7 +532,15 @@ if (isguestuser()) {
     redirect(get_login_url());
 }
 $context = context_system::instance();
-require_capability('moodle/site:config', $context);
+
+if (!has_capability('moodle/site:config', $context)) {
+    // Do not throw exception display an empty page with administration menu if visible for current user.
+    $PAGE->set_title($SITE->fullname);
+    $PAGE->set_heading($SITE->fullname);
+    echo $OUTPUT->header();
+    echo $OUTPUT->footer();
+    exit;
+}
 
 // check that site is properly customized
 $site = get_site();
@@ -521,6 +548,7 @@ if (empty($site->shortname)) {
     // probably new installation - lets return to frontpage after this step
     // remove settings that we want uninitialised
     unset_config('registerauth');
+    unset_config('timezone'); // Force admin to select timezone!
     redirect('upgradesettings.php?return=site');
 }
 
@@ -555,31 +583,36 @@ $cronoverdue = ($lastcron < time() - 3600 * 24);
 $dbproblems = $DB->diagnose();
 $maintenancemode = !empty($CFG->maintenance_enabled);
 
-// Available updates for Moodle core
+// Available updates for Moodle core.
 $updateschecker = \core\update\checker::instance();
 $availableupdates = array();
-$availableupdates['core'] = $updateschecker->get_update_info('core',
-    array('minmaturity' => $CFG->updateminmaturity, 'notifybuilds' => $CFG->updatenotifybuilds));
+$availableupdatesfetch = null;
 
-// Available updates for contributed plugins
-$pluginman = core_plugin_manager::instance();
-foreach ($pluginman->get_plugins() as $plugintype => $plugintypeinstances) {
-    foreach ($plugintypeinstances as $pluginname => $plugininfo) {
-        if (!empty($plugininfo->availableupdates)) {
-            foreach ($plugininfo->availableupdates as $pluginavailableupdate) {
-                if ($pluginavailableupdate->version > $plugininfo->versiondisk) {
-                    if (!isset($availableupdates[$plugintype.'_'.$pluginname])) {
-                        $availableupdates[$plugintype.'_'.$pluginname] = array();
+if (empty($CFG->disableupdatenotifications)) {
+    // Only compute the update information when it is going to be displayed to the user.
+    $availableupdates['core'] = $updateschecker->get_update_info('core',
+        array('minmaturity' => $CFG->updateminmaturity, 'notifybuilds' => $CFG->updatenotifybuilds));
+
+    // Available updates for contributed plugins
+    $pluginman = core_plugin_manager::instance();
+    foreach ($pluginman->get_plugins() as $plugintype => $plugintypeinstances) {
+        foreach ($plugintypeinstances as $pluginname => $plugininfo) {
+            if (!empty($plugininfo->availableupdates)) {
+                foreach ($plugininfo->availableupdates as $pluginavailableupdate) {
+                    if ($pluginavailableupdate->version > $plugininfo->versiondisk) {
+                        if (!isset($availableupdates[$plugintype.'_'.$pluginname])) {
+                            $availableupdates[$plugintype.'_'.$pluginname] = array();
+                        }
+                        $availableupdates[$plugintype.'_'.$pluginname][] = $pluginavailableupdate;
                     }
-                    $availableupdates[$plugintype.'_'.$pluginname][] = $pluginavailableupdate;
                 }
             }
         }
     }
-}
 
-// The timestamp of the most recent check for available updates
-$availableupdatesfetch = $updateschecker->get_last_timefetched();
+    // The timestamp of the most recent check for available updates
+    $availableupdatesfetch = $updateschecker->get_last_timefetched();
+}
 
 $buggyiconvnomb = (!function_exists('mb_convert_encoding') and @iconv('UTF-8', 'UTF-8//IGNORE', '100'.chr(130).'€') !== '100€');
 //check if the site is registered on Moodle.org

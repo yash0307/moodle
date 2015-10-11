@@ -272,7 +272,17 @@ EOD;
             context_user::instance($userid);
         }
 
-        return $DB->get_record('user', array('id'=>$userid), '*', MUST_EXIST);
+        $user = $DB->get_record('user', array('id' => $userid), '*', MUST_EXIST);
+
+        if (!$record['deleted'] && isset($record['interests'])) {
+            require_once($CFG->dirroot . '/user/editlib.php');
+            if (!is_array($record['interests'])) {
+                $record['interests'] = preg_split('/\s*,\s*/', trim($record['interests']), -1, PREG_SPLIT_NO_EMPTY);
+            }
+            useredit_update_interests($user, $record['interests']);
+        }
+
+        return $user;
     }
 
     /**
@@ -403,6 +413,10 @@ EOD;
 
         if (!isset($record['category'])) {
             $record['category'] = $DB->get_field_select('course_categories', "MIN(id)", "parent=0");
+        }
+
+        if (isset($record['tags']) && !is_array($record['tags'])) {
+            $record['tags'] = preg_split('/\s*,\s*/', trim($record['tags']), -1, PREG_SPLIT_NO_EMPTY);
         }
 
         $course = create_course((object)$record);
@@ -792,12 +806,19 @@ EOD;
             $record['userid'] = $USER->id;
         }
 
-        if (!isset($record['name'])) {
-            $record['name'] = 'Tag name ' . $i;
+        if (!isset($record['rawname'])) {
+            if (isset($record['name'])) {
+                $record['rawname'] = $record['name'];
+            } else {
+                $record['rawname'] = 'Tag name ' . $i;
+            }
         }
 
-        if (!isset($record['rawname'])) {
-            $record['rawname'] = 'Raw tag name ' . $i;
+        // Attribute 'name' should be a lowercase version of 'rawname', if not set.
+        if (!isset($record['name'])) {
+            $record['name'] = core_text::strtolower($record['rawname']);
+        } else {
+            $record['name'] = core_text::strtolower($record['name']);
         }
 
         if (!isset($record['tagtype'])) {

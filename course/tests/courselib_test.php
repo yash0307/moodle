@@ -539,7 +539,23 @@ class core_course_courselib_testcase extends advanced_testcase {
         return $moduleinfo;
    }
 
+    /**
+     * Data provider for course_delete module
+     *
+     * @return array An array of arrays contain test data
+     */
+    public function provider_course_delete_module() {
+        $data = array();
 
+        $data['assign'] = array('assign', array('duedate' => time()));
+        $data['quiz'] = array('quiz', array('duedate' => time()));
+
+        return $data;
+    }
+
+    /**
+     * Test the create_course function
+     */
     public function test_create_course() {
         global $DB;
         $this->resetAfterTest(true);
@@ -1476,51 +1492,92 @@ class core_course_courselib_testcase extends advanced_testcase {
         $this->assertEquals($pagecm->visible, 0);
     }
 
-    public function test_course_delete_module() {
+    /**
+     * Tests the function that deletes a course module
+     *
+     * @param string $type The type of module for the test
+     * @param array $options The options for the module creation
+     * @dataProvider provider_course_delete_module
+     */
+    public function test_course_delete_module($type, $options) {
         global $DB;
         $this->resetAfterTest(true);
         $this->setAdminUser();
 
         // Create course and modules.
         $course = $this->getDataGenerator()->create_course(array('numsections' => 5));
+        $options['course'] = $course->id;
 
         // Generate an assignment with due date (will generate a course event).
-        $assign = $this->getDataGenerator()->create_module('assign', array('duedate' => time(), 'course' => $course->id));
+        $module = $this->getDataGenerator()->create_module($type, $options);
 
         // Get the module context.
-        $modcontext = context_module::instance($assign->cmid);
+        $modcontext = context_module::instance($module->cmid);
 
         // Verify context exists.
         $this->assertInstanceOf('context_module', $modcontext);
 
-        // Add some tags to this assignment.
-        tag_set('assign', $assign->id, array('Tag 1', 'Tag 2', 'Tag 3'), 'mod_assign', $modcontext->id);
+        // Make module specific messes.
+        switch ($type) {
+            case 'assign':
+                // Add some tags to this assignment.
+                tag_set('assign', $module->id, array('Tag 1', 'Tag 2', 'Tag 3'), 'mod_assign', $modcontext->id);
 
-        // Confirm the tag instances were added.
-        $this->assertEquals(3, $DB->count_records('tag_instance', array('component' => 'mod_assign', 'contextid' =>
-            $modcontext->id)));
+                // Confirm the tag instances were added.
+                $criteria = array('component' => 'mod_assign', 'contextid' => $modcontext->id);
+                $this->assertEquals(3, $DB->count_records('tag_instance', $criteria));
 
-        // Verify event assignment event has been generated.
-        $eventcount = $DB->count_records('event', array('instance' => $assign->id, 'modulename' => 'assign'));
-        $this->assertEquals(1, $eventcount);
+                // Verify event assignment event has been generated.
+                $eventcount = $DB->count_records('event', array('instance' => $module->id, 'modulename' => $type));
+                $this->assertEquals(1, $eventcount);
+
+                break;
+            case 'quiz':
+                $qgen = $this->getDataGenerator()->get_plugin_generator('core_question');
+                $qcat = $qgen->create_question_category(array('contextid' => $modcontext->id));
+                $questions = array(
+                    $qgen->create_question('shortanswer', null, array('category' => $qcat->id)),
+                    $qgen->create_question('shortanswer', null, array('category' => $qcat->id)),
+                );
+                $this->expectOutputRegex('/'.get_string('unusedcategorydeleted', 'question').'/');
+                break;
+            default:
+                break;
+        }
 
         // Run delete..
-        course_delete_module($assign->cmid);
+        course_delete_module($module->cmid);
 
         // Verify the context has been removed.
-        $this->assertFalse(context_module::instance($assign->cmid, IGNORE_MISSING));
+        $this->assertFalse(context_module::instance($module->cmid, IGNORE_MISSING));
 
         // Verify the course_module record has been deleted.
-        $cmcount = $DB->count_records('course_modules', array('id' => $assign->cmid));
+        $cmcount = $DB->count_records('course_modules', array('id' => $module->cmid));
         $this->assertEmpty($cmcount);
 
-        // Verify event assignment events have been removed.
-        $eventcount = $DB->count_records('event', array('instance' => $assign->id, 'modulename' => 'assign'));
-        $this->assertEmpty($eventcount);
+        // Test clean up of module specific messes.
+        switch ($type) {
+            case 'assign':
+                // Verify event assignment events have been removed.
+                $eventcount = $DB->count_records('event', array('instance' => $module->id, 'modulename' => $type));
+                $this->assertEmpty($eventcount);
 
-        // Verify the tag instances were deleted.
-        $this->assertEquals(0, $DB->count_records('tag_instance', array('component' => 'mod_assign', 'contextid' =>
-            $modcontext->id)));
+                // Verify the tag instances were deleted.
+                $criteria = array('component' => 'mod_assign', 'contextid' => $modcontext->id);
+                $this->assertEquals(0, $DB->count_records('tag_instance', $criteria));
+                break;
+            case 'quiz':
+                // Verify category deleted.
+                $criteria = array('contextid' => $modcontext->id);
+                $this->assertEquals(0, $DB->count_records('question_categories', $criteria));
+
+                // Verify questions deleted.
+                $criteria = array('category' => $qcat->id);
+                $this->assertEquals(0, $DB->count_records('question', $criteria));
+                break;
+            default:
+                break;
+        }
     }
 
     /**
@@ -1546,7 +1603,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $sink->close();
 
         // Validate the event.
-        $event = $events[0];
+        $event = array_pop($events);
         $this->assertInstanceOf('\core\event\course_created', $event);
         $this->assertEquals('course', $event->objecttable);
         $this->assertEquals($course->id, $event->objectid);
@@ -1576,7 +1633,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $imstestcase->imsplugin->cron();
         $events = $sink->get_events();
         $sink->close();
-        $event = $events[0];
+        $event = array_pop($events);
 
         // Validate the event triggered is \core\event\course_created. There is no need to validate the other values
         // as they have already been validated in the previous steps. Here we only want to make sure that when the
@@ -1693,7 +1750,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $sink->close();
 
         // Validate the event.
-        $event = $events[1];
+        $event = array_pop($events);
         $this->assertInstanceOf('\core\event\course_deleted', $event);
         $this->assertEquals('course', $event->objecttable);
         $this->assertEquals($course->id, $event->objectid);
@@ -1745,7 +1802,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $sink->close();
 
         // Validate the event.
-        $event = $events[0];
+        $event = array_pop($events);
         $this->assertInstanceOf('\core\event\course_content_deleted', $event);
         $this->assertEquals('course', $event->objecttable);
         $this->assertEquals($course->id, $event->objectid);
@@ -1870,7 +1927,7 @@ class core_course_courselib_testcase extends advanced_testcase {
         $sink->close();
 
         // Validate the event.
-        $event = $events[0];
+        $event = array_pop($events);
         $this->assertInstanceOf('\core\event\course_restored', $event);
         $this->assertEquals('course', $event->objecttable);
         $this->assertEquals($rc->get_courseid(), $event->objectid);

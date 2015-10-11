@@ -191,8 +191,16 @@ function edit_module_post_actions($moduleinfo, $course) {
     // Sync idnumber with grade_item.
     if ($hasgrades && $grade_item = grade_item::fetch(array('itemtype'=>'mod', 'itemmodule'=>$moduleinfo->modulename,
                  'iteminstance'=>$moduleinfo->instance, 'itemnumber'=>0, 'courseid'=>$course->id))) {
+        $gradeupdate = false;
         if ($grade_item->idnumber != $moduleinfo->cmidnumber) {
             $grade_item->idnumber = $moduleinfo->cmidnumber;
+            $gradeupdate = true;
+        }
+        if (isset($moduleinfo->gradepass) && $grade_item->gradepass != $moduleinfo->gradepass) {
+            $grade_item->gradepass = $moduleinfo->gradepass;
+            $gradeupdate = true;
+        }
+        if ($gradeupdate) {
             $grade_item->update();
         }
     }
@@ -217,22 +225,12 @@ function edit_module_post_actions($moduleinfo, $course) {
             }
             $moduleinfo->gradecat = $grade_category->id;
         }
-        $gradecategory = $grade_item->get_parent_category();
+
         foreach ($items as $itemid=>$unused) {
             $items[$itemid]->set_parent($moduleinfo->gradecat);
             if ($itemid == $grade_item->id) {
                 // Use updated grade_item.
                 $grade_item = $items[$itemid];
-            }
-            if (!empty($moduleinfo->add)) {
-                if (grade_category::aggregation_uses_aggregationcoef($gradecategory->aggregation)) {
-                    if ($gradecategory->aggregation == GRADE_AGGREGATE_WEIGHTED_MEAN) {
-                        $grade_item->aggregationcoef = 1;
-                    } else {
-                        $grade_item->aggregationcoef = 0;
-                    }
-                    $grade_item->update();
-                }
             }
         }
     }
@@ -291,17 +289,6 @@ function edit_module_post_actions($moduleinfo, $course) {
 
                 } else if (isset($moduleinfo->gradecat)) {
                     $outcome_item->set_parent($moduleinfo->gradecat);
-                }
-                $gradecategory = $outcome_item->get_parent_category();
-                if ($outcomeexists == false) {
-                    if (grade_category::aggregation_uses_aggregationcoef($gradecategory->aggregation)) {
-                        if ($gradecategory->aggregation == GRADE_AGGREGATE_WEIGHTED_MEAN) {
-                            $outcome_item->aggregationcoef = 1;
-                        } else {
-                            $outcome_item->aggregationcoef = 0;
-                        }
-                        $outcome_item->update();
-                    }
                 }
             }
         }

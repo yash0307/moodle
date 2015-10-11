@@ -589,6 +589,10 @@ class grade_report_grader extends grade_report {
         $rows = array();
 
         $showuserimage = $this->get_pref('showuserimage');
+        $canseeuserreport = has_capability('gradereport/'.$CFG->grade_profilereport.':view', $this->context);
+        $canseesingleview = has_all_capabilities(array('gradereport/singleview:view', 'moodle/grade:viewall',
+            'moodle/grade:edit'), $this->context);
+        $hasuserreportcell = $canseeuserreport || $canseesingleview;
 
         $strfeedback  = $this->get_lang_string("feedback");
         $strgrade     = $this->get_lang_string('grade');
@@ -597,11 +601,7 @@ class grade_report_grader extends grade_report {
 
         $arrows = $this->get_sort_arrows($extrafields);
 
-        $colspan = 1;
-        if (has_capability('gradereport/'.$CFG->grade_profilereport.':view', $this->context)) {
-            $colspan++;
-        }
-        $colspan += count($extrafields);
+        $colspan = 1 + $hasuserreportcell + count($extrafields);
 
         $levels = count($this->gtree->levels) - 1;
 
@@ -628,7 +628,7 @@ class grade_report_grader extends grade_report {
         $studentheader->scope = 'col';
         $studentheader->header = true;
         $studentheader->id = 'studentheader';
-        if (has_capability('gradereport/'.$CFG->grade_profilereport.':view', $this->context)) {
+        if ($hasuserreportcell) {
             $studentheader->colspan = 2;
         }
         $studentheader->text = $arrows['studentname'];
@@ -685,7 +685,7 @@ class grade_report_grader extends grade_report {
             $userreportcell = new html_table_cell();
             $userreportcell->attributes['class'] = 'userreport';
             $userreportcell->header = false;
-            if (has_capability('gradereport/'.$CFG->grade_profilereport.':view', $this->context)) {
+            if ($canseeuserreport) {
                 $a = new stdClass();
                 $a->user = $fullname;
                 $strgradesforuser = get_string('gradesforuser', 'grades', $a);
@@ -693,7 +693,7 @@ class grade_report_grader extends grade_report {
                 $userreportcell->text .= $OUTPUT->action_icon($url, new pix_icon('t/grades', $strgradesforuser));
             }
 
-            if (has_capability('gradereport/singleview:view', $this->context)) {
+            if ($canseesingleview) {
                 $url = new moodle_url('/grade/report/singleview/index.php', array('id' => $this->course->id, 'itemid' => $user->id, 'item' => 'user'));
                 $singleview = $OUTPUT->action_icon($url, new pix_icon('t/editstring', get_string('singleview', 'grades', $fullname)));
                 $userreportcell->text .= $singleview;
@@ -837,14 +837,16 @@ class grade_report_grader extends grade_report {
                     }
 
                     $singleview = '';
-                    if (has_capability('gradereport/singleview:view', $this->context)) {
+                    if (has_all_capabilities(array('gradereport/singleview:view', 'moodle/grade:viewall',
+                        'moodle/grade:edit'), $this->context)) {
+
                         $url = new moodle_url('/grade/report/singleview/index.php', array(
                             'id' => $this->course->id,
                             'item' => 'grade',
                             'itemid' => $element['object']->id));
                         $singleview = $OUTPUT->action_icon(
                             $url,
-                            new pix_icon('t/editstring', get_string('singleview', 'grades', $element['object']->itemname))
+                            new pix_icon('t/editstring', get_string('singleview', 'grades', $element['object']->get_name()))
                         );
                     }
 
@@ -1086,8 +1088,8 @@ class grade_report_grader extends grade_report {
                     } else {
                         // The max and min for an aggregation may be different to the grade_item.
                         if (!is_null($gradeval)) {
-                            $item->grademax = $grade->rawgrademax;
-                            $item->grademin = $grade->rawgrademin;
+                            $item->grademax = $grade->get_grade_max();
+                            $item->grademin = $grade->get_grade_min();
                         }
 
                         $itemcell->text .= "<span class='gradevalue{$hidden}{$gradepass}'>" .
@@ -1345,7 +1347,7 @@ class grade_report_grader extends grade_report {
      * @return array Array of rows for the right part of the report
      */
     public function get_right_avg_row($rows=array(), $grouponly=false) {
-        global $USER, $DB, $OUTPUT;
+        global $USER, $DB, $OUTPUT, $CFG;
 
         if (!$this->canviewhidden) {
             // Totals might be affected by hiding, if user can not see hidden grades the aggregations might be altered
@@ -1377,7 +1379,11 @@ class grade_report_grader extends grade_report {
             list($gradebookrolessql, $gradebookrolesparams) = $DB->get_in_or_equal(explode(',', $this->gradebookroles), SQL_PARAMS_NAMED, 'grbr0');
 
             // Limit to users with an active enrollment.
-            list($enrolledsql, $enrolledparams) = get_enrolled_sql($this->context);
+            $coursecontext = $this->context->get_course_context(true);
+            $defaultgradeshowactiveenrol = !empty($CFG->grade_report_showonlyactiveenrol);
+            $showonlyactiveenrol = get_user_preferences('grade_report_showonlyactiveenrol', $defaultgradeshowactiveenrol);
+            $showonlyactiveenrol = $showonlyactiveenrol || !has_capability('moodle/course:viewsuspendedusers', $coursecontext);
+            list($enrolledsql, $enrolledparams) = get_enrolled_sql($this->context, '', 0, $showonlyactiveenrol);
 
             // We want to query both the current context and parent contexts.
             list($relatedctxsql, $relatedctxparams) = $DB->get_in_or_equal($this->context->get_parent_context_ids(true), SQL_PARAMS_NAMED, 'relatedctx');

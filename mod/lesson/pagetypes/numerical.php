@@ -257,6 +257,8 @@ class lesson_add_page_form_numerical extends lesson_add_page_form_base {
 
     public $qtype = 'numerical';
     public $qtypestring = 'numerical';
+    protected $answerformat = '';
+    protected $responseformat = LESSON_ANSWER_HTML;
 
     public function custom_definition() {
         for ($i = 0; $i < $this->_customdata['lesson']->maxanswers; $i++) {
@@ -275,6 +277,9 @@ class lesson_display_answer_form_numerical extends moodleform {
         global $USER, $OUTPUT;
         $mform = $this->_form;
         $contents = $this->_customdata['contents'];
+
+        // Disable shortforms.
+        $mform->setDisableShortforms();
 
         $mform->addElement('header', 'pageheader');
 

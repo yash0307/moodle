@@ -106,10 +106,30 @@ Y.extend(DRAGSECTION, M.core.dragdrop, {
                     cssleft.appendChild(this.get_drag_handle(title, CSS.SECTIONHANDLE, 'icon', true));
 
                     if (moveup) {
-                        moveup.remove();
+                        if (moveup.previous('br')) {
+                            moveup.previous('br').remove();
+                        } else if (moveup.next('br')) {
+                            moveup.next('br').remove();
+                        }
+
+                        if (moveup.ancestor('.section_action_menu')) {
+                            moveup.ancestor('li').remove();
+                        } else {
+                            moveup.remove();
+                        }
                     }
                     if (movedown) {
-                        movedown.remove();
+                        if (movedown.previous('br')) {
+                            movedown.previous('br').remove();
+                        } else if (movedown.next('br')) {
+                            movedown.next('br').remove();
+                        }
+
+                        if (movedown.ancestor('.section_action_menu')) {
+                            movedown.ancestor('li').remove();
+                        } else {
+                            movedown.remove();
+                        }
                     }
 
                     // This section can be moved - add the class to indicate this to Y.DD.
@@ -384,6 +404,18 @@ Y.extend(DRAGRESOURCE, M.core.dragdrop, {
      */
     setup_for_resource: function(baseselector) {
         Y.Node.all(baseselector).each(function(resourcesnode) {
+            var draggroups = resourcesnode.getData('draggroups');
+            if (!draggroups) {
+                // This Drop Node has not been set up. Configure it now.
+                resourcesnode.setAttribute('data-draggroups', this.groups.join(' '));
+                // Define empty ul as droptarget, so that item could be moved to empty list
+                new Y.DD.Drop({
+                    node: resourcesnode,
+                    groups: this.groups,
+                    padding: '20 0 20 0'
+                });
+            }
+
             // Replace move icons
             var move = resourcesnode.one('a.' + CSS.EDITINGMOVE);
             if (move) {
